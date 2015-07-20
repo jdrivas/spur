@@ -7,7 +7,7 @@ import (
 	"os"
 	"io"
 	"log"
-	"flag"
+	// "flag"
 	"fmt"
 	"strings"
 	"time"
@@ -15,56 +15,69 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/aws/aws-sdk-go/service/kinesis"
+	"gopkg.in/alecthomas/kingpin.v2"
+ )
+
+var (
+
+	// TODO think about setting this up as a command like UI with "generate", "prompt", "read" as commands.
+
+	app = kingpin.New("spur","A command-line AWS Kinesis applicaiton.")
+	verbose bool
+	region, stream, partition,shardID string
+	iType string
+	iteratorType = &iType
+
+	// Put data into the stream.
+	numberOfIterations int
+	testString string
+
+	prompt bool
+
+	read, tail bool
+
+	// region = kingpin.Flag("region", "find the kinsesis stream in this AWS region.").Default("us-west-1").String()
+	// stream = kingpin.Flag("stream", "use this Kinesis stream name").Default("JDR_TestStream_1").String()
+	// partition = kingpin.Flag("partition", "identify as this Kinesis stream partition").Default("PARTITION").String()
+	// shardID = kingpin.Flag("shard-id", "the Shard to read on the kinesis stream.").Default("shardId-000000000001").String()
+	// iteratorType = kingpin.Flag("iterator-type", "where to read the stream from").Default("LATEST").Enum("TRIM_HORIZON", "LATEST")
+
+	// latest = kingpin.Flag("latest", "start reading just after the most recent record in the stream").Short('l').Default("true").Bool()
+	// all = kingpin.Flag("all", "read from the last untrimmed record (oldest).").Default("false").Bool()
+
+	// kingpin.Flag("iterations", "number of test string entries to send to the kinesis stream.").Default("0").IntVar(&numberOfIterations)
+	// kingpin.Flag("test-string", "string to send to the kinsesis stream.").Default("this is a test string").StringVar(&testString)
+	// prompt = kingpin.Flag("prompt", "prompt for strings to send to the kinesis string.").Default("true").Bool()
+
+	// read = kingpin.Flag("read", "read from a kinesis stream. Will read after writing, if any.").Default("false").Bool()
+	// tail = kingpin.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').Default("false").Bool()
+
 )
+
+func init() {
+	kingpin.New("spur", "A command-line AWS Kinesis application.")
+	kingpin.Flag("verbose", "Describe what is going to happen, as it happens.").Short('v').BoolVar(&verbose)
+
+	kingpin.Flag("region", "find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
+	kingpin.Flag("stream", "use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
+	kingpin.Flag("partition", "identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
+	kingpin.Flag("shard-id", "the Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
+	kingpin.Flag("iterator-type", "where to read the stream from").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
+
+	kingpin.Flag("iterations", "number of test string entries to send to the kinesis stream.").Default("0").IntVar(&numberOfIterations)
+	kingpin.Flag("test-string", "string to send to the kinsesis stream.").Default("this is a test string").StringVar(&testString)
+
+	kingpin.Flag("prompt", "prompt for strings to send to the kinesis string.").Default("true").BoolVar(&prompt)
+
+	kingpin.Flag("read", "read from a kinesis stream. Will read after writing, if any.").Default("false").BoolVar(&read)
+	kingpin.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
+
+}
 
 func main() {
 
-	//
-	// Configure and Init
-	var verbose bool
-	flag.BoolVar(&verbose, "verbose", false, "describe what is going on as it happens.")
-
-	// AWS and Kinesis configuration
-	var region string
-	flag.StringVar(&region, "region", "us-west-1", "find the kinesis stream in this AWS region.")
-
-	var stream string
-	flag.StringVar(&stream, "stream", "JDR_TestStream_1", "use this Kinesis stream name.")
-
-	// TODO: set up a read partition that filters out all but messages for the names partitions.
-	var partition string
-	flag.StringVar(&partition, "partition", "PARTITION", "idenitfy as this Kineses stream partiion.")
-
-	var shardID string 
-	flag.StringVar(&shardID, "shard-id", "shardId-000000000000", "the Shard to read on the Kinesis stream.")
-
-
-	var latest bool
-	flag.BoolVar(&latest, "latest", true, "start reading just after the most recent record in the stream." )
-
-	var all bool
-	flag.BoolVar(&all, "all", false, "read from the last untrimmed record in the stream (oldest).")
-
-
-	// Write functions
-	var numberOfIterations int 
-	flag.IntVar(&numberOfIterations, "iterations", 0, "number of test string entries to send to the kinesis stream.")
-
-	var testString string
-	flag.StringVar(&testString, "test-string", "This is a test record", "string to send to the kinesis stream.")
-
-
-	var prompt bool
-	flag.BoolVar(&prompt, "prompt", true, "Prompt for strings to send to the kinesis stream, can't iterate and prompt.")
-
-	// Read functions
-	var read bool
-	flag.BoolVar(&read, "read", false, "Read from the kinesis stream. Will read after writing if any.")
-
-	var tail bool
-	flag.BoolVar(&tail, "tail", false, "Continue waiting for records to read from the stream, will set -latest unless -all specified.")
-
-	flag.Parse();
+	kingpin.Parse()
+	kingpin.CommandLine.Help = "A command-line AWS Kinesis applicaiton."
 
 	// TODO: Build this out into a command line setting.
 	// ShardIteratorType
@@ -73,20 +86,17 @@ func main() {
 	// - "TIME_HORIZONG" start reading at the last untrimmed record (oldest).
 	// - "LATEST"  start reading just after hte most recent record in the shard.
 	// Figure out where in the stream to read from.
-	shardIteratorType := "TRIM_HORIZON"
+	// shardIteratorType := "TRIM_HORIZON"
+	// shardIteratorType := iteratorType
 
 	// This map is  because searching isn't built into array.
 	flagStatus := make(map[string]bool)
 	// mark the variables set on the command line.
-	flag.Visit(func(f *flag.Flag) {
-		flagStatus[f.Name] = true
-	})
+	// flag.Visit(func(f *flag.Flag) {
+	// 	flagStatus[f.Name] = true
+	// })
 
-	if latest {
-		shardIteratorType = "LATEST"
-	} else {
-		shardIteratorType = "TRIM_HORIZON"
-	}
+	shardIteratorType := *iteratorType
 
 	if tail {
 		read = true;
@@ -95,13 +105,6 @@ func main() {
 		} else {
 			shardIteratorType = "LATEST"
 		}
-	}
-
-	if false {
-		fmt.Println("\nAll flag values:")
-		flag.VisitAll( func(f *flag.Flag) { fmt.Println(f.Name, ": ", f.Value) } )
-		fmt.Println("\nFlags set on command line:")
-		flag.Visit( func(f *flag.Flag) { fmt.Println(f.Name, ": ", f.Value) } )
 	}
 
 	if aws.DefaultConfig.Region == "" {
@@ -147,6 +150,8 @@ func main() {
 		}
 	} 
 
+	// TODO: add support for github.com/peterh/liner or 
+	// a readline equivelant.
 	// Read from STDIN and lines to Kinesis stream
 	if prompt {
 		reader := bufio.NewReader(os.Stdin)
@@ -175,6 +180,7 @@ func main() {
 	if read {
 		if verbose {
 			fmt.Println("\nReading from shard: ", shardID)
+			fmt.Println("With iterator type:", shardIteratorType)
 		}
 
 		// Get the first shard iterator
@@ -254,8 +260,8 @@ func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kine
 
 	record := &kinesis.PutRecordInput {
 		Data: logData,
-		PartitionKey: aws.String("PARTIION"),
-		StreamName: aws.String("JDR_TestStream_1"),
+		PartitionKey: aws.String(partition),
+		StreamName: aws.String(stream),
 		// ExplicitHashKey
 		// SequenceNUmberForORdering
 	}
