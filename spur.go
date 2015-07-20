@@ -58,7 +58,7 @@ var (
 
 func init() {
 	kingpin.New("spur", "A command-line AWS Kinesis application.")
-	kingpin.Flag("verbose", "Describe what is going to happen, as it happens.").Short('v').BoolVar(&verbose)
+	kingpin.Flag("verbose", "Describe what is happening, as it happens.").Short('v').BoolVar(&verbose)
 
 	kingpin.Flag("region", "find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
 	kingpin.Flag("stream", "use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
@@ -239,8 +239,8 @@ func main() {
 
 func doGen(svc *kinesis.Kinesis) {
 	if verbose {
-		fmt.Println("Will push %i enties into the stream.", numberOfIterations)
-		fmt.Println("Using the string: %s", testString)
+		fmt.Printf("Will push %v enties into the stream.\n", numberOfIterations)
+		fmt.Printf("Using the string: %s\n", testString)
 	}
 	for i := 0; i < numberOfIterations; i++ {
 		line := fmt.Sprintf("%s %d", testString, i)
@@ -251,7 +251,7 @@ func doGen(svc *kinesis.Kinesis) {
 
 		if verbose {
 			if i % 100 == 0 {
-				fmt.Printf("%i iteration\n%s", i, resp)
+				fmt.Printf("%d iteration %s\n", i, resp)
 			}
 		}
 	}
