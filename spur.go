@@ -7,7 +7,6 @@ import (
 	"os"
 	"io"
 	"log"
-	// "flag"
 	"fmt"
 	"strings"
 	"time"
@@ -173,16 +172,13 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 	}
 
 	siOutput := getFirstSharedIterator(svc, shardIteratorType)
-
-	// Get data from the stream and print them to stdout.
 	shardIteratorName := siOutput.ShardIterator
-
 	for moreData := true; moreData; {
 
 		output := getRecords(svc, shardIteratorName)
 		shardIteratorName = output.NextShardIterator
 
-		// Keep reading until we're caught up or sleep if we're tailling.
+		// Keep reading until we're caught up or catchup and sleep if we're tailling.
 		msecBehind := *output.MillisBehindLatest
 		if msecBehind <= 0 {
 			if tail {
@@ -230,6 +226,7 @@ func getRecords(svc *kinesis.Kinesis, shardIteratorName *string) (output *kinesi
 		// Limit: aws.Long(1),
 	}
 	output, err := svc.GetRecords(gr_params)
+
 	if err != nil {
 		printAWSError(err)
 		log.Fatal(err)
@@ -247,6 +244,7 @@ func getFirstSharedIterator(svc *kinesis.Kinesis, shardIteratorType string) (*ki
 		// StartingSequenceNumber:  aws.String(startingSequenceNumber)
 	}
 	siOutput, err := svc.GetShardIterator(siParams)
+
 	if err != nil {
 		printAWSError(err)
 		log.Fatal("Couldn't get the ShardIterator for shard: ", shardID)
