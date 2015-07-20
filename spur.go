@@ -57,7 +57,7 @@ func init() {
 	read = kingpin.Command("read", "read from a kinesis stream.")
 	read.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
 	read.Flag("shard-id", "the Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
-  // TODO: Build this out into a command line setting.
+	// TODO: Accommodate the other two types (two flags?, Arg, Flag?)
 	// ShardIteratorType
 	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
 	// - "AFTER_SEQUENCE_NUMBER" start reading right after the position indicated by the sequence number.
@@ -88,13 +88,16 @@ func main() {
 		fmt.Println("In region:", region)
 	}
 
-	// Set up Kinesis.
+	// The AWS library doesn't read configuariton information 
+	// out of .aws/config, just the credentials.
 	if aws.DefaultConfig.Region == "" {
 		aws.DefaultConfig.Region = region
 	}
+
+	// Set up Kinesis.
 	kinesis_svc := kinesis.New(aws.DefaultConfig)
 
-	// do something.
+	// Do something.
 	switch command {
 
 		case gen.FullCommand(): {
@@ -114,10 +117,12 @@ func main() {
 
 // Generate data by iterating a test string out to the stream.
 func doGen(svc *kinesis.Kinesis) {
+
 	if verbose {
 		fmt.Printf("Will push %v enties into the stream.\n", numberOfIterations)
 		fmt.Printf("Using the string: %s\n", testString)
 	}
+
 	for i := 0; i < numberOfIterations; i++ {
 		line := fmt.Sprintf("%s %d", testString, i)
 		resp, err := kPutLine(svc, line, partition, stream)
@@ -136,6 +141,7 @@ func doGen(svc *kinesis.Kinesis) {
 
 // Prompt for strings to send to the Kinesis stream.
 func doPrompt(svc *kinesis.Kinesis) {
+
 	reader := bufio.NewReader(os.Stdin)
 	moreToRead := true
 	for moreToRead {
@@ -160,46 +166,30 @@ func doPrompt(svc *kinesis.Kinesis) {
 
 
 func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
+
 	if verbose {
 		fmt.Println("\nReading from shard: ", shardID)
 		fmt.Println("With iterator type:", shardIteratorType)
 	}
 
-	// Get the first shard iterator
-	siParams := &kinesis.GetShardIteratorInput {
-		ShardID: aws.String(shardID),
-		ShardIteratorType: aws.String(shardIteratorType),
-		StreamName: aws.String(stream),
-		// StartingSequenceNumber:  aws.String(startingSequenceNumber)
-	}
-	siOutput, err := svc.GetShardIterator(siParams)
-	if err != nil {
-		printAWSError(err)
-		log.Fatal("Couldn't get the ShardIterator for shard: ", shardID)
-	}
+	siOutput := getFirstSharedIterator(svc, shardIteratorType)
 
 	// Get data from the stream and print them to stdout.
 	shardIteratorName := siOutput.ShardIterator
+
 	for moreData := true; moreData; {
-		gr_params := &kinesis.GetRecordsInput {
-			ShardIterator: aws.String(*shardIteratorName),
-			// Limit: aws.Long(1),
-		}
-		output, err := svc.GetRecords(gr_params)
-		if err != nil {
-			printAWSError(err)
-			log.Fatal(err)
-		}
+
+		output := getRecords(svc, shardIteratorName)
 		shardIteratorName = output.NextShardIterator
 
 		// Keep reading until we're caught up or sleep if we're tailling.
 		msecBehind := *output.MillisBehindLatest
 		if msecBehind <= 0 {
 			if tail {
-					time.Sleep(500 * time.Millisecond)
-				} else {
-					moreData = false
-				}
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				moreData = false
+			}
 		}
 
 		// Share what you got.
@@ -220,6 +210,7 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 }
 
 func fmtMilliseconds(msec int64) (string) {
+	// TODO: Add commas.
 	return fmt.Sprintf("%d msec", msec)
 }
 
@@ -231,6 +222,37 @@ func printAWSError(err error) {
 		fmt.Println("reqErr:")
 		fmt.Println(reqErr.Code(), reqErr.Message(), reqErr.StatusCode(), reqErr.RequestID())
 	}
+}
+
+func getRecords(svc *kinesis.Kinesis, shardIteratorName *string) (output *kinesis.GetRecordsOutput) {
+	gr_params := &kinesis.GetRecordsInput {
+		ShardIterator: aws.String(*shardIteratorName),
+		// Limit: aws.Long(1),
+	}
+	output, err := svc.GetRecords(gr_params)
+	if err != nil {
+		printAWSError(err)
+		log.Fatal(err)
+	}
+
+	return output
+}
+
+func getFirstSharedIterator(svc *kinesis.Kinesis, shardIteratorType string) (*kinesis.GetShardIteratorOutput) {
+	// Get the first shard iterator
+	siParams := &kinesis.GetShardIteratorInput {
+		ShardID: aws.String(shardID),
+		ShardIteratorType: aws.String(shardIteratorType),
+		StreamName: aws.String(stream),
+		// StartingSequenceNumber:  aws.String(startingSequenceNumber)
+	}
+	siOutput, err := svc.GetShardIterator(siParams)
+	if err != nil {
+		printAWSError(err)
+		log.Fatal("Couldn't get the ShardIterator for shard: ", shardID)
+	}
+
+	return siOutput
 }
  
 func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kinesis.PutRecordOutput, err error) {
