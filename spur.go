@@ -48,7 +48,7 @@ func init() {
 
 	kingpin.Flag("region", "Find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
 	kingpin.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
-	kingpin.Flag("partition", "identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
+	kingpin.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
 
 	gen = kingpin.Command("gen", "Put data into the Kinesis stream.")
 	gen.Flag("log", "Generate a log style prefix for each message including the current time. Default on, use --no-log to turn it off.").BoolVar(&genLog)
