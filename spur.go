@@ -9,6 +9,8 @@ import (
 	"log"
 	"fmt"
 	"strings"
+	// "path"
+	"path/filepath"
 	"time"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -28,6 +30,10 @@ var (
 	// Generate data.
 	gen *kingpin.CmdClause
 	genLog bool
+
+	genFile *kingpin.CmdClause
+	// fileName string
+	file *os.File
 
 	genItr *kingpin.CmdClause
 	numberOfIterations int
@@ -50,8 +56,12 @@ func init() {
 	kingpin.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
 	kingpin.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
 
-	gen = kingpin.Command("gen", "Put data into the Kinesis stream.")
+	gen = kingpin.Command("gen", "Put data into the Kinesis stream. This is inefficiently done a record at a time, no batching.")
 	gen.Flag("log", "Generate a log style prefix for each message including the current time. Default on, use --no-log to turn it off.").BoolVar(&genLog)
+
+	genFile = gen.Command("file", "Put data into the Kinesis stream from a file or stdin.")
+	genFile.Arg("file-name", "Name of file for reading newline separeted records, each record is sent to the Kinesis stream.").OpenFileVar(&file, os.O_RDONLY, 0666)
+
 
 	genItr = gen.Command("iterate", "Generate <iterations> log entires to the stream, using <test-string>.")
 	genItr.Arg("iterations", "Number of test string entries to send to the kinesis stream.").Required().IntVar(&numberOfIterations)
@@ -71,7 +81,7 @@ func init() {
 	read.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
 	read.Flag("log-empty-reads", "Print out the empty reads and delay stats. This will happen with verbose as well.").BoolVar(&showEmptyReads)
 
-	kingpin.CommandLine.Help = "A command-line AWS Kinesis applicaiton."
+	kingpin.CommandLine.Help = "A command-line AWS Kinesis application.\nSpur reads from the environment or ~/.aws/credentials for AWS credentials in the usual way."
 }
 
 func main() {
@@ -106,6 +116,10 @@ func main() {
 	// Do something.
 	switch command {
 
+		case genFile.FullCommand(): {
+			doPutFile(kinesis_svc)
+		}
+
 		case genItr.FullCommand(): {
 			doIterate(kinesis_svc)
 		}
@@ -122,6 +136,39 @@ func main() {
 }
 
 // TODO: refactor into two objects/files read and generate, plus a util file.
+
+func doPutFile(svc *kinesis.Kinesis) {
+
+	if file == nil {
+		if verbose {
+			fmt.Println("Reading from stdin, and putting the lines into the Kinesis stream.")
+		}
+		file = os.Stdin
+	} else {
+		if verbose {
+			// This is pretty close to disgusting.
+			absolutePath, _ := filepath.Abs(filepath.Join(filepath.Dir(file.Name()), file.Name()))
+			fmt.Printf("Putting file \"%s\" into the Kinesis stream.\n", absolutePath)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		i := 0
+		for scanner.Scan() {
+			resp, err := kPutLine(svc, scanner.Text(), partition, stream)
+			if err = scanner.Err(); err != nil {
+				log.Fatal(err)
+			}
+			if verbose {
+				fmt.Printf("Put line %d\n",i)
+				fmt.Printf("Resp: %s\n", resp)
+			}
+			i++
+		}
+	}
+
+}
+
 
 // Generate data by iterating a test string out to the stream.
 func doIterate(svc *kinesis.Kinesis) {
