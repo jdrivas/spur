@@ -159,24 +159,23 @@ func doPutFile(svc *kinesis.Kinesis) {
 			fmt.Printf("Putting file \"%s\" into the Kinesis stream.\n", absolutePath)
 		}
 		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		i := 0
-		for scanner.Scan() {
-			resp, err := kPutLine(svc, scanner.Text(), partition, stream)
-			if err = scanner.Err(); err != nil {
-				log.Fatal(err)
-			}
-			if verbose {
-				fmt.Printf("Put line %d\n", i)
-				fmt.Printf("Resp: %s\n", resp)
-			}
-			// I can't be doing this right, but it seems the compiler won't let
-			// me put the auto-increment in the printf above. What?
-			i++
-		}
 	}
 
+	scanner := bufio.NewScanner(file)
+	i := 0
+	for scanner.Scan() {
+		resp, err := kPutLine(svc, scanner.Text(), partition, stream)
+		if err = scanner.Err(); err != nil {
+			log.Fatal(err)
+		}
+		if verbose {
+			fmt.Printf("Put line %d\n", i)
+			fmt.Printf("Resp: %s\n", resp)
+		}
+		// I can't be doing this right, but it seems the compiler won't let
+		// me put the auto-increment in the printf above. What?
+		i++
+	}
 }
 
 
