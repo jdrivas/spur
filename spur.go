@@ -76,13 +76,21 @@ func init() {
 	// ShardIteratorType
 	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
 	// - "AFTER_SEQUENCE_NUMBER" start reading right after the position indicated by the sequence number.
-	// - "TIME_HORIZONG" start reading at the last untrimmed record (oldest).
+	// - "TIME_HORIZON" start reading at the last untrimmed record (oldest).
 	// - "LATEST"  start reading just after hte most recent record in the shard.
 	read.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
 	read.Flag("log-empty-reads", "Print out the empty reads and delay stats. This will happen with verbose as well.").BoolVar(&showEmptyReads)
 
 	kingpin.CommandLine.Help = "A command-line AWS Kinesis application.\nSpur reads from the environment or ~/.aws/credentials for AWS credentials in the usual way."
 }
+
+const (
+
+	// milliseconds to sleep in the read loop when we're tailing.
+	// maybe make this a flag?
+	sleepMilli = 500
+)
+
 
 func main() {
 
@@ -160,9 +168,11 @@ func doPutFile(svc *kinesis.Kinesis) {
 				log.Fatal(err)
 			}
 			if verbose {
-				fmt.Printf("Put line %d\n",i)
+				fmt.Printf("Put line %d\n", i)
 				fmt.Printf("Resp: %s\n", resp)
 			}
+			// I can't be doing this right, but it seems the compiler won't let
+			// me put the auto-increment in the printf above. What?
 			i++
 		}
 	}
@@ -220,6 +230,8 @@ func doPrompt(svc *kinesis.Kinesis) {
 	}
 }
 
+
+// Read string and print them fromt he stream.
 func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 
 	if verbose {
@@ -227,7 +239,7 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 		fmt.Println("With iterator type:", shardIteratorType)
 	}
 
-	// The read records funciton needs a shardIterator to determine
+	// The read records funciton needs a ShardIterator to determine
 	// which records to read. This first one can either be told
 	// to start with the oldest available (TRIM_HORIZON), the latest
 	// LATEST, or relative to an actual point AT_SEQUENCE_NUMBER", "AFTER_SEQUENCE_NUMBER"
@@ -249,7 +261,7 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 		msecBehind = *output.MillisBehindLatest
 		if msecBehind <= 0 {
 			if tail {
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(sleepMilli * time.Millisecond)
 			} else {
 				moreData = false
 			}
@@ -289,6 +301,7 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 	}
 }
 
+// Get a batch of records from the kinesis stream.
 func getRecords(svc *kinesis.Kinesis, shardIteratorName *string) (output *kinesis.GetRecordsOutput) {
 	gr_params := &kinesis.GetRecordsInput {
 		ShardIterator: aws.String(*shardIteratorName),
@@ -304,6 +317,8 @@ func getRecords(svc *kinesis.Kinesis, shardIteratorName *string) (output *kinesi
 	return output
 }
 
+
+// Construct a ShardIterator from basic values.
 func getFirstSharedIterator(svc *kinesis.Kinesis, shardIteratorType string) (*kinesis.GetShardIteratorOutput) {
 	// Get the first shard iterator
 	siParams := &kinesis.GetShardIteratorInput {
@@ -322,6 +337,8 @@ func getFirstSharedIterator(svc *kinesis.Kinesis, shardIteratorType string) (*ki
 	return siOutput
 }
  
+
+ // Put a line of text onto the kinesis stream, and optionally make it look like log data.
 func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kinesis.PutRecordOutput, err error) {
 
 	// Add log data to the line we've been given 
@@ -333,7 +350,7 @@ func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kine
 		PartitionKey: aws.String(partition),
 		StreamName: aws.String(stream),
 		// ExplicitHashKey
-		// SequenceNUmberForORdering
+		// SequenceNUmberForOrdering
 	}
 	
 	resp, err = svc.PutRecord(record)
@@ -344,6 +361,7 @@ func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kine
 
 	return resp, err
 }
+
 
 func fmtMilliseconds(msec int64) (string) {
 	hours := (msec / (1000*60*60)) % 24
@@ -360,6 +378,7 @@ func fmtMilliseconds(msec int64) (string) {
 		return fmt.Sprintf("%d milliseconds", msec)
 	}
 }
+
 
 func printAWSError(err error) {
 	awsErr, _ := err.(awserr.Error)
