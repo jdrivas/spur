@@ -81,7 +81,10 @@ func init() {
 	read.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
 	read.Flag("log-empty-reads", "Print out the empty reads and delay stats. This will happen with verbose as well.").BoolVar(&showEmptyReads)
 
-	kingpin.CommandLine.Help = "A command-line AWS Kinesis application.\nSpur reads from the environment or ~/.aws/credentials for AWS credentials in the usual way."
+	kingpin.CommandLine.Help = `A command-line AWS Kinesis application.
+	Spur reads from the environment or ~/.aws/credentials for AWS credentials in the usual way. Unfortunately
+	it doesn't read out the ~/.aws/configuration file for other informaiton (e.g. region).
+	`
 }
 
 const (
