@@ -45,6 +45,7 @@ var (
 	read *kingpin.CmdClause
 	showEmptyReads bool
 	tail bool
+	sleepMilli int
 	
 )
 
@@ -71,6 +72,7 @@ func init() {
 
 	read = kingpin.Command("read", "Read from a kinesis stream.")
 	read.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
+	read.Flag("sleep", "Delay in milliseconds for sleep between polls in tail mode.").Default("500").IntVar(&sleepMilli)
 	read.Flag("shard-id", "The Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
 	// TODO: Accommodate the other two ShardIterator types (two flags?, Arg, Flag?)
 	// ShardIteratorType
@@ -86,14 +88,6 @@ func init() {
 	it doesn't read out the ~/.aws/configuration file for other informaiton (e.g. region).
 	`
 }
-
-const (
-
-	// milliseconds to sleep in the read loop when we're tailing.
-	// maybe make this a flag?
-	sleepMilli = 500
-)
-
 
 func main() {
 
@@ -263,7 +257,7 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 		msecBehind = *output.MillisBehindLatest
 		if msecBehind <= 0 {
 			if tail {
-				time.Sleep(sleepMilli * time.Millisecond)
+				time.Sleep(time.Duration(sleepMilli) * time.Millisecond)
 			} else {
 				moreData = false
 			}
