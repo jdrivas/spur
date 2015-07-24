@@ -12,11 +12,13 @@ import (
 	// "path"
 	"path/filepath"
 	"time"
+	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/aws/aws-sdk-go/service/kinesis"
-	"gopkg.in/alecthomas/kingpin.v2"
+	"github.com/bobappleyard/readline"
+
  )
 
 var (
@@ -46,7 +48,7 @@ var (
 	showEmptyReads bool
 	tail bool
 	sleepMilli int
-	
+
 )
 
 func init() {
@@ -199,16 +201,11 @@ func doIterate(svc *kinesis.Kinesis) {
 	}
 }
 
-
-// Prompt for strings to send to the Kinesis stream.
 func doPrompt(svc *kinesis.Kinesis) {
 
-	// TODO: add in a readline library here.
-	reader := bufio.NewReader(os.Stdin)
 	moreToRead := true
 	for moreToRead {
-		fmt.Printf("Text to send <ctrl-D> to end > ")
-		line, err := reader.ReadString('\n')
+		line, err := readline.String("Send to Kinesis <crtl-d> to end: ")
 		if(err == io.EOF) {
 			moreToRead = false
 		} else if err !=  nil {
@@ -222,6 +219,7 @@ func doPrompt(svc *kinesis.Kinesis) {
 			if verbose {
 				fmt.Println("Response:", awsutil.StringValue(resp))
 			}
+			readline.AddHistory(line)
 		}
 	}
 }
