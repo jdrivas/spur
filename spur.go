@@ -13,7 +13,6 @@ import (
 	"time"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/bobappleyard/readline"
  )
@@ -34,7 +33,6 @@ var (
 	genLog bool
 
 	genFile *kingpin.CmdClause
-	// fileName string
 	file *os.File
 
 	genItr *kingpin.CmdClause
@@ -96,6 +94,7 @@ func init() {
 
 func main() {
 
+	// Parse the command line to fool with flags and get the command we'll execeute.
 	command := kingpin.Parse()
 
 	// Flag messiness.
@@ -106,6 +105,12 @@ func main() {
 		shardIteratorType = "LATEST"
 	}
 
+	// The AWS library doesn't read configuariton information 
+	// out of .aws/config, just the credentials from .aws/credentials.
+	if aws.DefaultConfig.Region == "" {
+		aws.DefaultConfig.Region = region
+	}
+
 	// Say Hello
 	if verbose {
 		// fmt.Println(aws.DefaultConfig.Credentials.Get())
@@ -113,16 +118,7 @@ func main() {
 		fmt.Println("To partition:", partition)
 		fmt.Println("In region:", region)
 	}
-
-	// The AWS library doesn't read configuariton information 
-	// out of .aws/config, just the credentials from .aws/credentials.
-	if aws.DefaultConfig.Region == "" {
-		aws.DefaultConfig.Region = region
-	}
-
-	// Set up Kinesis.
-	kinesisStream := NewStream(aws.DefaultConfig, stream, partition, shardIteratorType, shardID)
-
+	
 	// List of commands as parsed matched against functions to execute the commands.
 	commandMap := map[string]func(*KinesisStream)(){
 		interactive.FullCommand(): doInteractive,
@@ -131,6 +127,9 @@ func main() {
 		genPrompt.FullCommand(): doPrompt,
 		read.FullCommand(): doRead,
 	}
+
+	// Set up Kinesis.
+	kinesisStream := NewStream(aws.DefaultConfig, stream, partition, shardIteratorType, shardID)
 
 	// Execute the command.
 	commandMap[command](kinesisStream)
@@ -156,7 +155,6 @@ func doPutFile(s *KinesisStream) {
 	scanner := bufio.NewScanner(file)
 	i := 0
 	for scanner.Scan() {
-		// resp, err := kPutLine(kStream, scanner.Text())
 		resp, err := s.PutLogLine(scanner.Text())
 		if err != nil {
 			printAWSError(err)
@@ -183,7 +181,6 @@ func doIterate(s *KinesisStream) {
 
 	for i := 0; i < numberOfIterations; i++ {
 		line := fmt.Sprintf("%s %d", testString, i)
-		// resp, err := kPutLine(svc, line, partition, stream)
 		resp, err := s.PutLogLine(line)
 		if err != nil {
 			log.Fatal(err)
@@ -201,13 +198,12 @@ func doPrompt(s *KinesisStream) {
 
 	moreToRead := true
 	for moreToRead {
-		line, err := readline.String("Send to Kinesis <crtl-d> to end: ")
+		line, err := readline.String("Send to Kinesis, <crtl-d> to end: ")
 		if(err == io.EOF) {
 			moreToRead = false
 		} else if err !=  nil {
 			log.Fatal(err)
 		} else {
-			// eat the trailing new line, before you send it off to the stream.
 			resp, err := s.PutLogLine(strings.TrimRight(line, "\n"))
 			if err != nil {
 				log.Fatal(err)
@@ -219,7 +215,6 @@ func doPrompt(s *KinesisStream) {
 		}
 	}
 }
-
 
 // Read string and print them fromt he stream.
 func doRead(s *KinesisStream) {
@@ -256,7 +251,8 @@ func doRead(s *KinesisStream) {
 		if showEmptyReads || verbose {
 			if len(output.Records) > 0 {
 				if (emptyReads != 0 ) {
-					fmt.Println(emptyReads, "empty responses (no records) and delay is now:", fmtMilliseconds(msecBehind), "behind the tip of the stream.")
+					fmt.Println(emptyReads, "empty responses (no records) and delay is now:", 
+						fmtMilliseconds(msecBehind), "behind the tip of the stream.")
 				}
 				if(verbose) {
 					fmt.Println("Got ", len(output.Records), " data records.")
@@ -267,7 +263,8 @@ func doRead(s *KinesisStream) {
 				if emptyReads == 0 {
 					if lastDelay != msecBehind {
 						lastDelay = msecBehind
-						fmt.Printf("The response is %s behind the top of the stream.\n", fmtMilliseconds(msecBehind))
+						fmt.Printf("The response is %s behind the top of the stream.\n", 
+							fmtMilliseconds(msecBehind))
 					}
 				}
 				emptyReads++
@@ -288,52 +285,20 @@ func doRead(s *KinesisStream) {
 
 func doInteractive(s *KinesisStream) {
 
+	prompt := s.Name + " >"
 	for moreCommands := true; moreCommands; {
-		line, err := readline.String("&> ")
+		line, err := readline.String(prompt)
 		if(err == io.EOF) {
 			moreCommands = false
 		} else if err !=  nil {
 			log.Fatal(err)
 		} else {
-			doICommand(line, s)
-			readline.AddHistory(line)
+			err = doICommand(line, s)
+			if( err != nil) {
+				fmt.Printf("Error - %s\n", err)
+			} else {
+				readline.AddHistory(line)
+			}
 		}
-	}
-}
-
-func doICommand(line string, s *KinesisStream) {
-	// fmt.Printf("Doing command: \"%s\"\n", line)
-	fields := strings.Fields(line)	
-	switch command := fields[0]; command {
-		case "list": {
-			fmt.Printf("Doing list.\n")
-		}
-	}
-}
-
-
-func fmtMilliseconds(msec int64) (string) {
-	hours := (msec / (1000*60*60)) % 24
-	minutes := (msec / (1000*60)) % 60
-	var seconds float32 = float32(msec - int64(hours * 1000*60*60) - int64(minutes *1000*60)) / 1000.0
-
-	if hours > 0 {
-		return fmt.Sprintf("%d hours %d minutes", hours, minutes)
-	} else if minutes > 0 {
-		return fmt.Sprintf("%d minutes and %g seconds", minutes, seconds)
-	} else if seconds >= 1.0 {
-		return fmt.Sprintf("%g seconds", seconds)
-	} else {
-		return fmt.Sprintf("%d milliseconds", msec)
-	}
-}
-
-func printAWSError(err error) {
-	awsErr, _ := err.(awserr.Error)
-	fmt.Println("awsError:")
-	fmt.Println(awsErr.Code(), awsErr.Message(), awsErr.OrigErr())
-	if reqErr, ok := err.(awserr.RequestFailure); ok {
-		fmt.Println("reqErr:")
-		fmt.Println(reqErr.Code(), reqErr.Message(), reqErr.StatusCode(), reqErr.RequestID())
 	}
 }
