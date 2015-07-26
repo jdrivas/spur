@@ -9,16 +9,13 @@ import (
 	"log"
 	"fmt"
 	"strings"
-	// "path"
 	"path/filepath"
 	"time"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/awsutil"
-	"github.com/aws/aws-sdk-go/service/kinesis"
 	"github.com/bobappleyard/readline"
-
  )
 
 var (
@@ -28,6 +25,9 @@ var (
 	region, stream, partition,shardID string
 	iType string
 	iteratorType = &iType
+
+	// Prompt for Commands
+	interactive *kingpin.CmdClause
 
 	// Generate data.
 	gen *kingpin.CmdClause
@@ -58,6 +58,16 @@ func init() {
 	kingpin.Flag("region", "Find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
 	kingpin.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
 	kingpin.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
+	// TODO: Accommodate the other two ShardIterator types (two flags?, Arg, Flag?)
+	// ShardIteratorType
+	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
+	// - "AFTER_SEQUENCE_NUMBER" start reading right after the position indicated by the sequence number.
+	// - "TIME_HORIZON" start reading at the last untrimmed record (oldest).
+	// - "LATEST"  start reading just after hte most recent record in the shard.
+	kingpin.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
+
+
+	interactive = kingpin.Command("interactive", "Prompt for commands.")
 
 	gen = kingpin.Command("gen", "Put data into the Kinesis stream. This is inefficiently done a record at a time, no batching.")
 	gen.Flag("log", "Generate a log style prefix for each message including the current time. Default on, use --no-log to turn it off.").BoolVar(&genLog)
@@ -76,13 +86,6 @@ func init() {
 	read.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
 	read.Flag("sleep", "Delay in milliseconds for sleep between polls in tail mode.").Default("500").IntVar(&sleepMilli)
 	read.Flag("shard-id", "The Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
-	// TODO: Accommodate the other two ShardIterator types (two flags?, Arg, Flag?)
-	// ShardIteratorType
-	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
-	// - "AFTER_SEQUENCE_NUMBER" start reading right after the position indicated by the sequence number.
-	// - "TIME_HORIZON" start reading at the last untrimmed record (oldest).
-	// - "LATEST"  start reading just after hte most recent record in the shard.
-	read.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
 	read.Flag("log-empty-reads", "Print out the empty reads and delay stats. This will happen with verbose as well.").BoolVar(&showEmptyReads)
 
 	kingpin.CommandLine.Help = `A command-line AWS Kinesis application.
@@ -112,39 +115,29 @@ func main() {
 	}
 
 	// The AWS library doesn't read configuariton information 
-	// out of .aws/config, just the credentials.
+	// out of .aws/config, just the credentials from .aws/credentials.
 	if aws.DefaultConfig.Region == "" {
 		aws.DefaultConfig.Region = region
 	}
 
 	// Set up Kinesis.
-	kinesis_svc := kinesis.New(aws.DefaultConfig)
+	kinesisStream := NewStream(aws.DefaultConfig, stream, partition, shardIteratorType, shardID)
 
-	// Do something.
-	switch command {
-
-		case genFile.FullCommand(): {
-			doPutFile(kinesis_svc)
-		}
-
-		case genItr.FullCommand(): {
-			doIterate(kinesis_svc)
-		}
-
-		case genPrompt.FullCommand(): {
-			doPrompt(kinesis_svc)
-		}
-
-		case read.FullCommand(): {
-			doRead(kinesis_svc, shardIteratorType)
-		}
-
+	// List of commands as parsed matched against functions to execute the commands.
+	commandMap := map[string]func(*KinesisStream)(){
+		interactive.FullCommand(): doInteractive,
+		genFile.FullCommand(): doPutFile,
+		genItr.FullCommand(): doIterate,
+		genPrompt.FullCommand(): doPrompt,
+		read.FullCommand(): doRead,
 	}
+
+	// Execute the command.
+	commandMap[command](kinesisStream)
+
 }
 
-// TODO: refactor into two objects/files read and generate, plus a util file.
-
-func doPutFile(svc *kinesis.Kinesis) {
+func doPutFile(s *KinesisStream) {
 
 	if file == nil {
 		if verbose {
@@ -163,7 +156,11 @@ func doPutFile(svc *kinesis.Kinesis) {
 	scanner := bufio.NewScanner(file)
 	i := 0
 	for scanner.Scan() {
-		resp, err := kPutLine(svc, scanner.Text(), partition, stream)
+		// resp, err := kPutLine(kStream, scanner.Text())
+		resp, err := s.PutLogLine(scanner.Text())
+		if err != nil {
+			printAWSError(err)
+		}
 		if err = scanner.Err(); err != nil {
 			log.Fatal(err)
 		}
@@ -171,15 +168,13 @@ func doPutFile(svc *kinesis.Kinesis) {
 			fmt.Printf("Put line %d\n", i)
 			fmt.Printf("Resp: %s\n", resp)
 		}
-		// I can't be doing this right, but it seems the compiler won't let
-		// me put the auto-increment in the printf above. What?
 		i++
 	}
 }
 
 
 // Generate data by iterating a test string out to the stream.
-func doIterate(svc *kinesis.Kinesis) {
+func doIterate(s *KinesisStream) {
 
 	if verbose {
 		fmt.Printf("Will push %v enties into the stream.\n", numberOfIterations)
@@ -188,7 +183,8 @@ func doIterate(svc *kinesis.Kinesis) {
 
 	for i := 0; i < numberOfIterations; i++ {
 		line := fmt.Sprintf("%s %d", testString, i)
-		resp, err := kPutLine(svc, line, partition, stream)
+		// resp, err := kPutLine(svc, line, partition, stream)
+		resp, err := s.PutLogLine(line)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -201,7 +197,7 @@ func doIterate(svc *kinesis.Kinesis) {
 	}
 }
 
-func doPrompt(svc *kinesis.Kinesis) {
+func doPrompt(s *KinesisStream) {
 
 	moreToRead := true
 	for moreToRead {
@@ -212,7 +208,7 @@ func doPrompt(svc *kinesis.Kinesis) {
 			log.Fatal(err)
 		} else {
 			// eat the trailing new line, before you send it off to the stream.
-			resp, err := kPutLine(svc, strings.TrimRight(line, "\n"), partition, stream)
+			resp, err := s.PutLogLine(strings.TrimRight(line, "\n"))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -226,30 +222,25 @@ func doPrompt(svc *kinesis.Kinesis) {
 
 
 // Read string and print them fromt he stream.
-func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
+func doRead(s *KinesisStream) {
 
 	if verbose {
-		fmt.Println("\nReading from shard: ", shardID)
-		fmt.Println("With iterator type:", shardIteratorType)
+		fmt.Println("\nReading from shard: ", s.ShardID)
+		fmt.Println("With iterator type:", s.ShardIteratorType)
 	}
 
-	// The read records funciton needs a ShardIterator to determine
-	// which records to read. This first one can either be told
-	// to start with the oldest available (TRIM_HORIZON), the latest
-	// LATEST, or relative to an actual point AT_SEQUENCE_NUMBER", "AFTER_SEQUENCE_NUMBER"
-	// Have to add more UI to get the sequence AT/AFTER Sequence number adeed in.
-	//
-	// Each read will generate a next iterator to use.
-	// siOutput := getFirstSharedIterator(svc, shardIteratorType)
-	// shardIteratorName := siOutput.ShardIterator
 	var msecBehind int64 = 0
 	var lastDelay int64 = 0
 	emptyReads := 0
-	shardIteratorName := getFirstSharedIterator(svc, shardIteratorType).ShardIterator
+
+	s.ReadReset();
 	for moreData := true; moreData; {
 
-		output := getRecords(svc, shardIteratorName)
-		shardIteratorName = output.NextShardIterator
+		output, err := s.GetRecords()
+		if err != nil {
+			printAWSError(err)
+			log.Fatal(err)
+		}
 
 		// Keep reading until we're caught up or catchup and sleep if we're tailling.
 		msecBehind = *output.MillisBehindLatest
@@ -295,65 +286,29 @@ func doRead(svc *kinesis.Kinesis, shardIteratorType string) {
 	}
 }
 
-// Get a batch of records from the kinesis stream.
-func getRecords(svc *kinesis.Kinesis, shardIteratorName *string) (output *kinesis.GetRecordsOutput) {
-	gr_params := &kinesis.GetRecordsInput {
-		ShardIterator: aws.String(*shardIteratorName),
-		// Limit: aws.Long(1),
-	}
-	output, err := svc.GetRecords(gr_params)
+func doInteractive(s *KinesisStream) {
 
-	if err != nil {
-		printAWSError(err)
-		log.Fatal(err)
+	for moreCommands := true; moreCommands; {
+		line, err := readline.String("&> ")
+		if(err == io.EOF) {
+			moreCommands = false
+		} else if err !=  nil {
+			log.Fatal(err)
+		} else {
+			doICommand(line, s)
+			readline.AddHistory(line)
+		}
 	}
-
-	return output
 }
 
-
-// Construct a ShardIterator from basic values.
-func getFirstSharedIterator(svc *kinesis.Kinesis, shardIteratorType string) (*kinesis.GetShardIteratorOutput) {
-	// Get the first shard iterator
-	siParams := &kinesis.GetShardIteratorInput {
-		ShardID: aws.String(shardID),
-		ShardIteratorType: aws.String(shardIteratorType),
-		StreamName: aws.String(stream),
-		// StartingSequenceNumber:  aws.String(startingSequenceNumber)
+func doICommand(line string, s *KinesisStream) {
+	// fmt.Printf("Doing command: \"%s\"\n", line)
+	fields := strings.Fields(line)	
+	switch command := fields[0]; command {
+		case "list": {
+			fmt.Printf("Doing list.\n")
+		}
 	}
-	siOutput, err := svc.GetShardIterator(siParams)
-
-	if err != nil {
-		printAWSError(err)
-		log.Fatal("Couldn't get the ShardIterator for shard: ", shardID)
-	}
-
-	return siOutput
-}
- 
-
- // Put a line of text onto the kinesis stream, and optionally make it look like log data.
-func kPutLine(svc *kinesis.Kinesis,  line, partition, stream string) (resp *kinesis.PutRecordOutput, err error) {
-
-	// Add log data to the line we've been given 
-	logString := fmt.Sprintf("[ %s ] %s", time.Now().UTC().Format(time.RFC1123Z), line)
-	logData := []byte(logString)
-
-	record := &kinesis.PutRecordInput {
-		Data: logData,
-		PartitionKey: aws.String(partition),
-		StreamName: aws.String(stream),
-		// ExplicitHashKey
-		// SequenceNUmberForOrdering
-	}
-	
-	resp, err = svc.PutRecord(record)
-
-	if err != nil {
-		printAWSError(err)
-	}
-
-	return resp, err
 }
 
 
@@ -372,7 +327,6 @@ func fmtMilliseconds(msec int64) (string) {
 		return fmt.Sprintf("%d milliseconds", msec)
 	}
 }
-
 
 func printAWSError(err error) {
 	awsErr, _ := err.(awserr.Error)
