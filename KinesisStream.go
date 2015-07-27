@@ -21,6 +21,33 @@ func NewStream(config *aws.Config, name, partition, iteratorType, shardID string
 	return &KinesisStream{svc, name, partition, iteratorType, shardID, ""}
 }
 
+func (s *KinesisStream) ListStreams()(streams []string, err error) {
+
+	for  {
+
+		output, err := s.Service.ListStreams(&kinesis.ListStreamsInput{}) 
+		if err != nil {
+			return streams, err
+		}
+
+		var name string
+		for _, name := range output.StreamNames {
+			streams = append(streams, *name)
+		}
+
+		if *output.HasMoreStreams {
+			output, err = s.Service.ListStreams(&kinesis.ListStreamsInput {ExclusiveStartStreamName: &name} )
+			if err != nil {
+				return streams, err
+			}
+		} else {
+			break
+		}
+	}
+
+	return streams, nil
+}
+
 func (s *KinesisStream) PutLogLine(line string) (*kinesis.PutRecordOutput, error) {
 	logString := fmt.Sprintf("[ %s ] %s", time.Now().UTC().Format(time.RFC1123Z), line)
 	logData := []byte(logString)
