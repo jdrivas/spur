@@ -1,14 +1,14 @@
-package main 
+package main
 
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 )
 
-func fmtMilliseconds(msec int64) (string) {
-	hours := (msec / (1000*60*60)) % 24
-	minutes := (msec / (1000*60)) % 60
-	var seconds float32 = float32(msec - int64(hours * 1000*60*60) - int64(minutes *1000*60)) / 1000.0
+func fmtMilliseconds(msec int64) string {
+	hours := (msec / (1000 * 60 * 60)) % 24
+	minutes := (msec / (1000 * 60)) % 60
+	var seconds float32 = float32(msec-int64(hours*1000*60*60)-int64(minutes*1000*60)) / 1000.0
 
 	if hours > 0 {
 		return fmt.Sprintf("%d hours %d minutes", hours, minutes)

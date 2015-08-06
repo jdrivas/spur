@@ -4,75 +4,73 @@ package main
 
 import (
 	"bufio"
-	"os"
-	"io"
-	"log"
 	"fmt"
-	"strings"
-	"path/filepath"
-	"time"
-	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awsutil"
 	"github.com/bobappleyard/readline"
- )
+	"gopkg.in/alecthomas/kingpin.v2"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
 
 var (
-
-	app = kingpin.New("spur","A command-line AWS Kinesis demo.")
-	verbose bool
-	region, stream, partition,shardID string
-	iType string
-	iteratorType = &iType
+	app                                *kingpin.Application
+	verbose                            bool
+	region, stream, partition, shardID string
+	iType                              string
+	iteratorType                       = &iType
 
 	// Prompt for Commands
 	interactive *kingpin.CmdClause
 
 	// Generate data.
-	gen *kingpin.CmdClause
+	gen    *kingpin.CmdClause
 	genLog bool
 
 	genFile *kingpin.CmdClause
-	file *os.File
+	file    *os.File
 
-	genItr *kingpin.CmdClause
+	genItr             *kingpin.CmdClause
 	numberOfIterations int
-	testString string	
+	testString         string
 
 	genPrompt *kingpin.CmdClause
 
 	// Read data.
-	read *kingpin.CmdClause
+	read           *kingpin.CmdClause
 	showEmptyReads bool
-	tail bool
-	sleepMilli int
+	tail           bool
+	sleepMilli     int
 
+	streamGroup *KinesisStreamGroup
 )
 
 func init() {
-	kingpin.New("spur", "A command-line AWS Kinesis application.")
-	kingpin.Flag("verbose", "Describe what is happening, as it happens.").Short('v').BoolVar(&verbose)
+	app = kingpin.New("spur", "A command-line AWS Kinesis application.")
+	app.Flag("verbose", "Describe what is happening, as it happens.").Short('v').BoolVar(&verbose)
 
-	kingpin.Flag("region", "Find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
-	kingpin.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
-	kingpin.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
+	app.Flag("region", "Find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
+	app.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
+	app.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
 	// TODO: Accommodate the other two ShardIterator types (two flags?, Arg, Flag?)
 	// ShardIteratorType
 	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
 	// - "AFTER_SEQUENCE_NUMBER" start reading right after the position indicated by the sequence number.
 	// - "TIME_HORIZON" start reading at the last untrimmed record (oldest).
 	// - "LATEST"  start reading just after hte most recent record in the shard.
-	kingpin.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
+	app.Flag("iterator-type", "Where to start reading the stream.").Default("LATEST").EnumVar(&iteratorType, "TRIM_HORIZON", "LATEST")
 
+	interactive = app.Command("interactive", "Prompt for commands.")
 
-	interactive = kingpin.Command("interactive", "Prompt for commands.")
-
-	gen = kingpin.Command("gen", "Put data into the Kinesis stream. This is inefficiently done a record at a time, no batching.")
+	gen = app.Command("gen", "Put data into the Kinesis stream. This is inefficiently done a record at a time, no batching.")
 	gen.Flag("log", "Generate a log style prefix for each message including the current time. Default on, use --no-log to turn it off.").BoolVar(&genLog)
 
 	genFile = gen.Command("file", "Put data into the Kinesis stream from a file or stdin.")
 	genFile.Arg("file-name", "Name of file for reading newline separeted records, each record is sent to the Kinesis stream.").OpenFileVar(&file, os.O_RDONLY, 0666)
-
 
 	genItr = gen.Command("iterate", "Generate <iterations> log entires to the stream, using <test-string>.")
 	genItr.Arg("iterations", "Number of test string entries to send to the kinesis stream.").Required().IntVar(&numberOfIterations)
@@ -80,7 +78,7 @@ func init() {
 
 	genPrompt = gen.Command("prompt", "Prompt for strings to send to the kinesis stream.")
 
-	read = kingpin.Command("read", "Read from a kinesis stream.")
+	read = app.Command("read", "Read from a kinesis stream.")
 	read.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
 	read.Flag("sleep", "Delay in milliseconds for sleep between polls in tail mode.").Default("500").IntVar(&sleepMilli)
 	read.Flag("shard-id", "The Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
@@ -95,7 +93,7 @@ func init() {
 func main() {
 
 	// Parse the command line to fool with flags and get the command we'll execeute.
-	command := kingpin.Parse()
+	command := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	// Flag messiness.
 	shardIteratorType := *iteratorType
@@ -105,7 +103,7 @@ func main() {
 		shardIteratorType = "LATEST"
 	}
 
-	// The AWS library doesn't read configuariton information 
+	// The AWS library doesn't read configuariton information
 	// out of .aws/config, just the credentials from .aws/credentials.
 	if aws.DefaultConfig.Region == "" {
 		aws.DefaultConfig.Region = region
@@ -118,21 +116,30 @@ func main() {
 		fmt.Println("To partition:", partition)
 		fmt.Println("In region:", region)
 	}
-	
+
 	// List of commands as parsed matched against functions to execute the commands.
-	commandMap := map[string]func(*KinesisStream)(){
-		interactive.FullCommand(): doInteractive,
-		genFile.FullCommand(): doPutFile,
-		genItr.FullCommand(): doIterate,
-		genPrompt.FullCommand(): doPrompt,
-		read.FullCommand(): doRead,
+	commandMap := map[string]func(*KinesisStream){
+		// interactive.FullCommand(): doInteractive,
+		genFile.FullCommand():     doPutFile,
+		genItr.FullCommand():      doIterate,
+		genPrompt.FullCommand():   doPrompt,
+		read.FullCommand():        doRead,
 	}
 
 	// Set up Kinesis.
 	kinesisStream := NewStream(aws.DefaultConfig, stream, partition, shardIteratorType, shardID)
 
 	// Execute the command.
-	commandMap[command](kinesisStream)
+	if interactive.FullCommand() == command {
+		streamGroup, err := NewStreamGroup(aws.DefaultConfig)
+		streamGroup.CurrentStream = kinesisStream
+		if err != nil {
+			log.Fatal(err)
+		}
+		doInteractive(streamGroup)
+	} else {
+		commandMap[command](kinesisStream)
+	}
 
 }
 
@@ -170,7 +177,6 @@ func doPutFile(s *KinesisStream) {
 	}
 }
 
-
 // Generate data by iterating a test string out to the stream.
 func doIterate(s *KinesisStream) {
 
@@ -187,7 +193,7 @@ func doIterate(s *KinesisStream) {
 		}
 
 		if verbose {
-			if i % 100 == 0 {
+			if i%100 == 0 {
 				fmt.Printf("%d iteration %s\n", i, resp)
 			}
 		}
@@ -199,9 +205,9 @@ func doPrompt(s *KinesisStream) {
 	moreToRead := true
 	for moreToRead {
 		line, err := readline.String("Send to Kinesis, <crtl-d> to end: ")
-		if(err == io.EOF) {
+		if err == io.EOF {
 			moreToRead = false
-		} else if err !=  nil {
+		} else if err != nil {
 			log.Fatal(err)
 		} else {
 			resp, err := s.PutLogLine(strings.TrimRight(line, "\n"))
@@ -228,7 +234,7 @@ func doRead(s *KinesisStream) {
 	var lastDelay int64 = 0
 	emptyReads := 0
 
-	s.ReadReset();
+	s.ReadReset()
 	for moreData := true; moreData; {
 
 		output, err := s.GetRecords()
@@ -250,11 +256,11 @@ func doRead(s *KinesisStream) {
 		// Share what you got.
 		if showEmptyReads || verbose {
 			if len(output.Records) > 0 {
-				if (emptyReads != 0 ) {
-					fmt.Println(emptyReads, "empty responses (no records) and delay is now:", 
+				if emptyReads != 0 {
+					fmt.Println(emptyReads, "empty responses (no records) and delay is now:",
 						fmtMilliseconds(msecBehind), "behind the tip of the stream.")
 				}
-				if(verbose) {
+				if verbose {
 					fmt.Println("Got ", len(output.Records), " data records.")
 					fmt.Println("The response is  ", fmtMilliseconds(msecBehind), " behind the tip of the stream.")
 				}
@@ -263,7 +269,7 @@ func doRead(s *KinesisStream) {
 				if emptyReads == 0 {
 					if lastDelay != msecBehind {
 						lastDelay = msecBehind
-						fmt.Printf("The response is %s behind the top of the stream.\n", 
+						fmt.Printf("The response is %s behind the top of the stream.\n",
 							fmtMilliseconds(msecBehind))
 					}
 				}
@@ -273,7 +279,7 @@ func doRead(s *KinesisStream) {
 
 		for i, record := range output.Records {
 			if verbose {
-				fmt.Println("Data record: ", i + 1)
+				fmt.Println("Data record: ", i+1)
 				fmt.Println("Partition: ", *record.PartitionKey)
 				fmt.Println("SequenceNumber: ", *record.SequenceNumber)
 				fmt.Printf("Data: ")
@@ -283,21 +289,21 @@ func doRead(s *KinesisStream) {
 	}
 }
 
-func doInteractive(s *KinesisStream) {
+func doInteractive(g *KinesisStreamGroup) {
 
-	prompt := s.Name + " >"
+
+	prompt := g.CurrentStream.Name + "(" + g.Region + ") >"
 	for moreCommands := true; moreCommands; {
 		line, err := readline.String(prompt)
-		if(err == io.EOF) {
+		if err == io.EOF {
 			moreCommands = false
-		} else if err !=  nil {
+		} else if err != nil {
 			log.Fatal(err)
 		} else {
-			err = doICommand(line, s)
-			if( err != nil) {
+			readline.AddHistory(line)
+			err = doICommand(line, g)
+			if err != nil {
 				fmt.Printf("Error - %s\n", err)
-			} else {
-				readline.AddHistory(line)
 			}
 		}
 	}
