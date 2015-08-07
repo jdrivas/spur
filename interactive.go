@@ -1,39 +1,43 @@
 package main
 
 import (
-	// "errors"
 	"fmt"
-	// "strconv"
 	"strings"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
-	interApp *kingpin.Application
+	interApp 		 *kingpin.Application
 
 	interIterate *kingpin.CmdClause
 	iterateCount int
 
-	interList *kingpin.CmdClause
+	interPrompt *kingpin.CmdClause
 
+	interList 	*kingpin.CmdClause
 	interCreate *kingpin.CmdClause
+	interDelete *kingpin.CmdClause
 	interStreamName string
 
-	interDelete *kingpin.CmdClause
 )
 
 func init() {
+
 	interApp = kingpin.New("", "Spur interactive mode.")
+
+	// Write to stream
 	interIterate = interApp.Command("iterate", "Push a number of log entires to the Kinesis stream.")
 	interIterate.Arg("numberOfIterations", "Number of log entires to push to the Kinesis stream").Required().IntVar(&iterateCount)
+	interPrompt = interApp.Command("prompt", "Prompt for lines of text to log to stream")
 
+	// Read from streams
+
+	// Manage streams
 	interList = interApp.Command("list", "List the available Kinesis streams.")
-
 	interCreate = interApp.Command("create", "Create a new Kinesis stream.")
 	interCreate.Arg("stream", "Name of Kinesis stream to create").Required().StringVar(&interStreamName)
 	interDelete = interApp.Command("delete", "Delete a specific Kinesis stream.")
 	interDelete.Arg("stream", "Name of Kinesis stream to delete").Required().StringVar(&interStreamName)
-
 }
 
 const (
@@ -41,12 +45,11 @@ const (
 	defaultTestString = "Testing the stream."
 )
 
-
 func doICommand(line string, g *KinesisStreamGroup) (err error) {
 	line = strings.TrimRight(line, "\n")
 	fields := []string{}
 	fields = append(fields, strings.Fields(line)...)
-	if len(fields) <= 0 {
+	if len(fields) <= 0 {                                                                                                                                                                                                                                                                                       
 		return nil
 	}
 
@@ -60,12 +63,11 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
 			case interDelete.FullCommand(): err = doDeleteStream(g)
 			case interCreate.FullCommand(): err = doCreateStream(g)
 			case interIterate.FullCommand(): err = doIterateWrite(g)
+			case interPrompt.FullCommand(): err = doPromptWrite(g)
 			default: fmt.Printf("(Shoudn't get here) - Unknown Command: %s\n", command)
 		}
 	}
-
 	return err
-
 }
 
 func doCreateStream(g *KinesisStreamGroup) (err error) {
@@ -78,8 +80,6 @@ func doCreateStream(g *KinesisStreamGroup) (err error) {
 }
 
 func doDeleteStream(g *KinesisStreamGroup) (error) {
-
-	// name := args[1]
 	err := g.DeleteKinesisStream(interStreamName)
 	if err == nil {
 		fmt.Printf("Deleted sttream: %s.\n", interStreamName)
@@ -88,7 +88,6 @@ func doDeleteStream(g *KinesisStreamGroup) (error) {
 }
 
 func doListStreams(g *KinesisStreamGroup) (error) {
-
 	streams, err := g.ListStreams()
 	if err == nil {
 		for i, description := range streams {
@@ -114,9 +113,20 @@ func doListStreams(g *KinesisStreamGroup) (error) {
 	return err
 }
 
-// func iterateCommand(line string, args []string, g *KinesisStreamGroup) (err error) {
-func doIterateWrite(g *KinesisStreamGroup) (err error) {
+func doPromptWrite(g *KinesisStreamGroup) (err error) {
 
+	xPRCommand := func(line string) (err error) {	
+		_, e := g.CurrentStream.PutLogLine(line)
+		return e
+	}
+
+	prompt := g.CurrentStream.Name + "(write) >"
+	err = promptLoop(prompt, xPRCommand)
+	fmt.Println("")
+	return err
+}
+
+func doIterateWrite(g *KinesisStreamGroup) (err error) {
 	testString := defaultTestString
 	for i := 0; i < iterateCount; i++ {
 		line := fmt.Sprintf("%s: %d", testString, i)
@@ -125,6 +135,5 @@ func doIterateWrite(g *KinesisStreamGroup) (err error) {
 			return err
 		}
 	}
-
 	return nil
 }

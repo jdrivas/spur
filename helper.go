@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"github.com/bobappleyard/readline"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 )
 
@@ -29,4 +32,21 @@ func printAWSError(err error) {
 		fmt.Println("reqErr:")
 		fmt.Println(reqErr.Code(), reqErr.Message(), reqErr.StatusCode(), reqErr.RequestID())
 	}
+}
+
+func promptLoop(prompt string, process func(string) (error)) (err error) {
+
+	for moreCommands := true; moreCommands; {
+		line, err := readline.String(prompt)
+		if err == io.EOF {
+			moreCommands = false
+		} else if err != nil {
+			log.Fatal(err)
+		} else {
+			readline.AddHistory(line)
+			err = process(line)
+			if err != nil {return err}
+		}
+	}
+	return nil
 }
