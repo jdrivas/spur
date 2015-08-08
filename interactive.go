@@ -2,18 +2,30 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
+	"time"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
 	interApp 		 *kingpin.Application
 
+	interVerbose *kingpin.CmdClause
+	iVerbose bool
+
 	interIterate *kingpin.CmdClause
 	iterateCount int
+	interTestString []string
 
 	interPrompt *kingpin.CmdClause
 
+	interRead *kingpin.CmdClause
+	interTailCmd *kingpin.CmdClause
+	interReadType *string
+	interTail bool
+
+	interShow *kingpin.CmdClause
 	interList 	*kingpin.CmdClause
 	interCreate *kingpin.CmdClause
 	interDelete *kingpin.CmdClause
@@ -23,14 +35,22 @@ var (
 
 func init() {
 
-	interApp = kingpin.New("", "Spur interactive mode.")
+	interApp = kingpin.New("", "Spur interactive mode.").Terminate(doTerminate)
+
+	// state 
+	interVerbose = interApp.Command("verbose", "toggle verbose mode")
 
 	// Write to stream
 	interIterate = interApp.Command("iterate", "Push a number of log entires to the Kinesis stream.")
-	interIterate.Arg("numberOfIterations", "Number of log entires to push to the Kinesis stream").Required().IntVar(&iterateCount)
-	interPrompt = interApp.Command("prompt", "Prompt for lines of text to log to stream")
+	interIterate.Arg("numberOfIterations", "Number of log entires to push to the Kinesis stream.").Required().IntVar(&iterateCount)
+	interIterate.Arg("test-string", "string to use in the log message.").Default("Testing the stream.").StringsVar(&interTestString)
+
+	interPrompt = interApp.Command("prompt", "Prompt for lines of text to log to stream.")
 
 	// Read from streams
+	interRead = interApp.Command("read", "Read from the stream.")
+	interReadType = interRead.Arg("read type", "How to read from the stream <latest|all|tail>.").Required().Enum("latest", "all", "tail")
+
 
 	// Manage streams
 	interList = interApp.Command("list", "List the available Kinesis streams.")
@@ -38,14 +58,18 @@ func init() {
 	interCreate.Arg("stream", "Name of Kinesis stream to create").Required().StringVar(&interStreamName)
 	interDelete = interApp.Command("delete", "Delete a specific Kinesis stream.")
 	interDelete.Arg("stream", "Name of Kinesis stream to delete").Required().StringVar(&interStreamName)
+
+	// Manage current stream
+	interShow = interApp.Command("show", "Display details of the current Kinesis Stream.")
 }
 
-const (
-	defaultIterations = 10
-	defaultTestString = "Testing the stream."
-)
 
 func doICommand(line string, g *KinesisStreamGroup) (err error) {
+
+	// This is due to a 'peculiarity' kingpin, it collects strings as arguments across parses.
+	interTestString = []string{}
+
+	// Prepare the line for parsing.
 	line = strings.TrimRight(line, "\n")
 	fields := []string{}
 	fields = append(fields, strings.Fields(line)...)
@@ -55,7 +79,7 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
 
 	command, err := interApp.Parse(fields)
 	if err != nil {
-		fmt.Printf("Parse error: %s\n", err)
+		fmt.Printf("Command error: %s\n", err)
 		return nil
 	} else {
 		switch command {
@@ -64,10 +88,32 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
 			case interCreate.FullCommand(): err = doCreateStream(g)
 			case interIterate.FullCommand(): err = doIterateWrite(g)
 			case interPrompt.FullCommand(): err = doPromptWrite(g)
+			case interRead.FullCommand(): err = doReadStream(g)
+			case interShow.FullCommand(): err = doShowStream(g)
+			case interVerbose.FullCommand(): doVerbose()			
+			case "help": // do nothing in the case we fall through to help.
 			default: fmt.Printf("(Shoudn't get here) - Unknown Command: %s\n", command)
 		}
 	}
 	return err
+}
+
+func toggleVerbose() (bool) {
+	iVerbose = !iVerbose
+	return iVerbose
+}
+
+func doVerbose() {
+	if toggleVerbose() {
+		fmt.Println("Verbose is on.")
+	} else {
+		fmt.Println("Verbose is off.")		
+	}
+}
+
+func doShowStream(g *KinesisStreamGroup) (err error) {
+	fmt.Printf("Current stream is: \n%s", g.CurrentStream.Description())
+	return nil
 }
 
 func doCreateStream(g *KinesisStreamGroup) (err error) {
@@ -114,7 +160,6 @@ func doListStreams(g *KinesisStreamGroup) (error) {
 }
 
 func doPromptWrite(g *KinesisStreamGroup) (err error) {
-
 	xPRCommand := func(line string) (err error) {	
 		_, e := g.CurrentStream.PutLogLine(line)
 		return e
@@ -127,7 +172,14 @@ func doPromptWrite(g *KinesisStreamGroup) (err error) {
 }
 
 func doIterateWrite(g *KinesisStreamGroup) (err error) {
-	testString := defaultTestString
+	testString := ""
+	for i := range interTestString {
+		testString += " " + interTestString[i]
+	}
+	if iVerbose {
+		fmt.Printf("Using \"%s\" as the test string for %d iterations.\n", testString, iterateCount)
+	}
+
 	for i := 0; i < iterateCount; i++ {
 		line := fmt.Sprintf("%s: %d", testString, i)
 		_, err := g.CurrentStream.PutLogLine(line)
@@ -136,4 +188,98 @@ func doIterateWrite(g *KinesisStreamGroup) (err error) {
 		}
 	}
 	return nil
+}
+
+func doReadStreamTail(g *KinesisStreamGroup) (err error) {
+	interTail = true
+	g.CurrentStream.ShardIteratorType = "LATEST"
+	return doReadStream(g)
+}
+
+func configureFromReadType(readType string) (shardIteeator string, tail bool) {
+	switch readType {
+		case "tail": return "LATEST", true
+		case "latest": return "LATEST", false
+		case "all": return "TRIM_HORIZON", false
+		default: log.Fatal(fmt.Sprintf("Unkonown ReadType: %s", readType))
+	}
+	return "", false
+}
+
+func doReadStream(g *KinesisStreamGroup) (err error) {
+
+	const sleepMilli = 500
+	var lastDelay, msecBehind int64 = 0,0
+	s := g.CurrentStream
+	s.ShardIteratorType, interTail = configureFromReadType(*interReadType)
+	
+	if iVerbose {
+		fmt.Printf("Reading from shard: %s\n", s.ShardID)
+		fmt.Printf("With iterator type: %s\n", s.ShardIteratorType)
+	}
+
+	emptyReads := 0
+	s.ReadReset()
+	for moreData := true; moreData; {
+
+		output, err := s.GetRecords()
+		if err != nil {
+			printAWSError(err)
+			return err
+		}
+
+		// Read until we're caught up, or sleep if we're tailing.
+		// TODO: Tail needs fixing. Currently, we can only control-c out of it
+		// need to set something up that allows us to tail and listen
+		// and so stop taliing with a control-d.
+		msecBehind = *output.MillisBehindLatest
+		if msecBehind == 0 {
+			if interTail {
+				time.Sleep(time.Duration(sleepMilli) * time.Millisecond)
+			} else {
+				moreData = false
+			}
+		}
+
+		// Count empty reads, and only report on them when we finally get data.
+		if len(output.Records) > 0 {
+			if iVerbose {
+				if emptyReads != 0 {
+					fmt.Printf("%d empty responses (no records).")
+				} 
+				fmt.Printf("Got %d data records\n", len(output.Records))
+			}
+			emptyReads = 0 
+		} else {
+			emptyReads++
+		}
+
+		// Report if the lag from end of stream has changed.
+		if iVerbose && (lastDelay != msecBehind) {
+			lastDelay = msecBehind 
+			if msecBehind == 0 {
+				fmt.Printf("We are now at the top of the stream.\n")
+			} else {
+				fmt.Printf("The response is now %s behind the top of stream.\n", fmtMilliseconds(msecBehind))
+			}
+		}
+
+		for i, record := range output.Records {
+			if iVerbose {
+				fmt.Printf("Data record: %d\n", i+1)
+				fmt.Printf("Parittion: %s\n", *record.PartitionKey)
+				fmt.Printf("Sequence number: %s\n", *record.SequenceNumber)
+				fmt.Printf("Data: ")
+			}
+			fmt.Println(string(record.Data))
+			if iVerbose {fmt.Println()}
+		}
+	}
+
+	return nil
+}
+
+// This is used to catch the termiation on help
+// that is the default kingpin behavior.
+func doTerminate(i int) {
 }
