@@ -157,3 +157,17 @@ func (s *KinesisStream) getFirstShardIteratorName() error {
   }
   return err
 }
+
+func (s *KinesisStream) String() (string) {
+  return fmt.Sprintf("%s - (%s)",  s.Name, s.Partition)
+}
+
+func (s *KinesisStream) Description() string {
+  return fmt.Sprintf("Name: \"%s\"\n", s.Name) +
+    fmt.Sprintf("Partition: \"%s\"\n", s.Partition) +
+    fmt.Sprintf("ShardIteratorType: \"%s\"\n", s.ShardIteratorType) +
+    fmt.Sprintf("ShardID: \"%s\"\n", s.ShardID) +
+    fmt.Sprintf("NextShardIteratorName: \"%s\"\n", s.NextShardIteratorName)
+
+
+}
