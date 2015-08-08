@@ -56,6 +56,7 @@ func init() {
 	app.Flag("region", "Find the kinsesis stream in this AWS region.").Default("us-west-1").StringVar(&region)
 	app.Flag("stream", "Use this Kinesis stream name").Default("JDR_TestStream_1").StringVar(&stream)
 	app.Flag("partition", "Identify as this Kinesis stream partition").Default("PARTITION").StringVar(&partition)
+	app.Flag("shard-id", "The Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
 	// TODO: Accommodate the other two ShardIterator types (two flags?, Arg, Flag?)
 	// ShardIteratorType
 	// - "AT_SEQUENCE_NUMBER" start reading at a particular sequence numner
@@ -81,7 +82,6 @@ func init() {
 	read = app.Command("read", "Read from a kinesis stream.")
 	read.Flag("tail", "Continue waiting for records to read from the stream, will set latest unless -all specificed").Short('t').BoolVar(&tail)
 	read.Flag("sleep", "Delay in milliseconds for sleep between polls in tail mode.").Default("500").IntVar(&sleepMilli)
-	read.Flag("shard-id", "The Shard to read on the kinesis stream.").Default("shardId-000000000001").StringVar(&shardID)
 	read.Flag("log-empty-reads", "Print out the empty reads and delay stats. This will happen with verbose as well.").BoolVar(&showEmptyReads)
 
 	kingpin.CommandLine.Help = `A command-line AWS Kinesis application.
