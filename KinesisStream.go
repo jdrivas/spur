@@ -46,19 +46,34 @@ func (g *KinesisStreamGroup) init() (err error){
   return nil
 }
 
-func (g *KinesisStreamGroup) CreateKinesisStream(name string, shards int64) (err error) {
-  _, err = g.Service.CreateStream(&kinesis.CreateStreamInput{StreamName: &name, ShardCount: &shards})
+func (g *KinesisStreamGroup) CreateKinesisStream(name string, shards int64) (*KinesisStream, error) {
+  _, err := g.Service.CreateStream(&kinesis.CreateStreamInput{StreamName: &name, ShardCount: &shards})
   g.Streams[name] = &KinesisStream{Service: g.Service, Name: name}
-  return err
+  return g.Streams[name], err
 }
 
-func (g *KinesisStreamGroup) DeleteKinesisStream(name string) (err error) {
-  stream := g.Streams[name]
-  if stream != nil {
+func (g *KinesisStreamGroup) GetStream(name string) (stream *KinesisStream, err error) {
+  stream = g.Streams[name]
+  err = nil
+  if stream == nil {
+    err = errors.New(fmt.Sprintf("Coulnd't find the stream named: \"%s\".", name))
+  }
+  return stream, err
+}
+
+func (g *KinesisStreamGroup) DeleteKinesisStream(name string) (*KinesisStream, error) {
+  stream, err := g.GetStream(name)
+  if err == nil {
     delete(g.Streams, name)
     _, err = stream.Service.DeleteStream(&kinesis.DeleteStreamInput{StreamName: &name})
-  } else {
-      err = errors.New(fmt.Sprintf("Coulnd't fine the stream named: \"%s\"", name))
+  }
+  return stream, err
+}
+
+func (g* KinesisStreamGroup) SetCurrentStream(name string) (err error) {
+  stream, err := g.GetStream(name)
+  if err == nil {
+    g.CurrentStream = stream
   }
   return err
 }
@@ -170,4 +185,26 @@ func (s *KinesisStream) Description() string {
     fmt.Sprintf("NextShardIteratorName: \"%s\"\n", s.NextShardIteratorName)
 
 
+}
+
+func (s* KinesisStream) GetAWSDescription() (*kinesis.StreamDescription, error) {
+  res, err := s.Service.DescribeStream(&kinesis.DescribeStreamInput{StreamName: &s.Name})
+  return res.StreamDescription, err
+}
+
+func (s* KinesisStream) WaitForStateChange(delaySeconds, periodSeconds int, currentState string, cb func(string, error)) {
+  go func() {
+    time.Sleep(time.Second * time.Duration(delaySeconds))
+    var e error
+    var status string
+    for sd, e := s.GetAWSDescription(); e == nil;  {
+      if *sd.StreamStatus != currentState {
+        status = *sd.StreamStatus
+        break;
+      }
+      time.Sleep(time.Second * time.Duration(periodSeconds))
+      sd, e = s.GetAWSDescription()
+    }
+    cb(status, e)
+  }()
 }

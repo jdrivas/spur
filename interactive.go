@@ -26,6 +26,7 @@ var (
 	interTail bool
 
 	interShow *kingpin.CmdClause
+	interUse *kingpin.CmdClause
 	interList 	*kingpin.CmdClause
 	interCreate *kingpin.CmdClause
 	interDelete *kingpin.CmdClause
@@ -61,6 +62,8 @@ func init() {
 
 	// Manage current stream
 	interShow = interApp.Command("show", "Display details of the current Kinesis Stream.")
+	interUse = interApp.Command("use", "Set the named stream as the current Kinesis Stream for future commands.")
+	interUse.Arg("stream", "Name of KinesisStream to use.").Required().StringVar(&interStreamName)
 }
 
 
@@ -90,6 +93,7 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
 			case interPrompt.FullCommand(): err = doPromptWrite(g)
 			case interRead.FullCommand(): err = doReadStream(g)
 			case interShow.FullCommand(): err = doShowStream(g)
+			case interUse.FullCommand(): err = doUseStream(g)
 			case interVerbose.FullCommand(): doVerbose()			
 			case "help": // do nothing in the case we fall through to help.
 			default: fmt.Printf("(Shoudn't get here) - Unknown Command: %s\n", command)
@@ -111,23 +115,32 @@ func doVerbose() {
 	}
 }
 
-func doShowStream(g *KinesisStreamGroup) (err error) {
-	fmt.Printf("Current stream is: \n%s", g.CurrentStream.Description())
-	return nil
-}
 
 func doCreateStream(g *KinesisStreamGroup) (err error) {
 	shards := int64(2)
-	err = g.CreateKinesisStream(interStreamName, shards)
+	stream, err := g.CreateKinesisStream(interStreamName, shards)
 	if err == nil {
-		fmt.Printf("Created stream: %s with %d shards.\n", interStreamName, shards)
+		stream.WaitForStateChange(10, 1, "CREATING", func(stateName string, err error) {
+			if err == nil {
+				fmt.Printf("\nStream %s is now in the %s state.\n", stream.Name, stateName)
+			}
+			})
+		fmt.Printf("Created stream: %s with %d shards.\n", stream.Name, shards)
 	}
 	return err
 }
 
 func doDeleteStream(g *KinesisStreamGroup) (error) {
-	err := g.DeleteKinesisStream(interStreamName)
+	stream, err := g.DeleteKinesisStream(interStreamName)
 	if err == nil {
+		stream.WaitForStateChange(10, 1, "DELETING", func(stateName string, err error) {
+			if err == nil {
+				if stateName == "" {
+					stateName = "DELETED"
+				}
+				fmt.Printf("\nStream %s, is now in the %s state.\n", stream.Name, stateName)
+			}
+		})
 		fmt.Printf("Deleted sttream: %s.\n", interStreamName)
 	}
 	return err
@@ -157,6 +170,20 @@ func doListStreams(g *KinesisStreamGroup) (error) {
 		}
 	}
 	return err
+}
+
+func doShowStream(g *KinesisStreamGroup) (err error) {
+	fmt.Printf("Current stream is: \n%s", g.CurrentStream.Description())
+	return nil
+}
+
+func doUseStream(g *KinesisStreamGroup) (err error) {
+	err = g.SetCurrentStream(interStreamName)
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+	}
+	fmt.Printf("Now using %s.\n", g.CurrentStream.Name)
+	return nil
 }
 
 func doPromptWrite(g *KinesisStreamGroup) (err error) {
