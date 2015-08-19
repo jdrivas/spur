@@ -8,20 +8,20 @@ var util = require('gulp-util')
 var gulpProcess;
    
 gulp.task('build', function() {
-	build = child.spawnSync("go", ["install"])
-	if(build.stderr.length)	{
-		util.log(chalk.white.bgRed.bold(" GO Install Failed "))
-		var lines = build.stderr.toString().split('\n');
-		for (var l in lines)
-			util.log(chalk.red(lines[l]));
-	} else {
-		util.log(chalk.white.bgGreen.bold(' Go Install Successful '));
-	}
-	return build;
+  build = child.spawnSync("go", ["install"])
+  if(build.stderr.length) {
+    util.log(chalk.white.bgRed.bold(" GO Install Failed "))
+    var lines = build.stderr.toString().split('\n');
+    for (var l in lines)
+      util.log(chalk.red(lines[l]));
+  } else {
+    util.log(chalk.white.bgGreen.bold(' Go Install Successful '));
+  }
+  return build;
 });
 
 gulp.task('watch', function(){
-	gulp.watch('**/*.go', ['build']);
+  gulp.watch('**/*.go', ['build']);
 })
 
 // Variety of ways explored to get gulp to reload on gulpfile edit.
