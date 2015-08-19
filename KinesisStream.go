@@ -114,6 +114,18 @@ func (g *KinesisStreamGroup) ListStreams() (streams []*StreamDescription, err er
   return streams, nil
 }
 
+func (g *KinesisStreamGroup) String() string {
+  return fmt.Sprintf("In %s there are %d streams, current: %s",g.Region, len(g.Streams), g.CurrentStream.Name)
+}
+
+func (g *KinesisStreamGroup) Description() (s string) {
+  s = fmt.Sprintf("%s.\n", g)
+  for _, stream := range g.Streams {
+    s += stream.Description() + "\n"
+  }
+  return s
+}
+
 func (s *KinesisStream) PutLogLine(line string) (*kinesis.PutRecordOutput, error) {
   logString := fmt.Sprintf("[ %s ] %s", time.Now().UTC().Format(time.RFC1123Z), line)
   logData := []byte(logString)
@@ -183,9 +195,9 @@ func (s *KinesisStream) Description() string {
     fmt.Sprintf("ShardIteratorType: \"%s\"\n", s.ShardIteratorType) +
     fmt.Sprintf("ShardID: \"%s\"\n", s.ShardID) +
     fmt.Sprintf("NextShardIteratorName: \"%s\"\n", s.NextShardIteratorName)
-
-
 }
+
+
 
 func (s* KinesisStream) GetAWSDescription() (*kinesis.StreamDescription, error) {
   res, err := s.Service.DescribeStream(&kinesis.DescribeStreamInput{StreamName: &s.Name})

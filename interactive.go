@@ -28,6 +28,7 @@ var (
 	interShow *kingpin.CmdClause
 	interUse *kingpin.CmdClause
 	interList 	*kingpin.CmdClause
+	interListType *string
 	interCreate *kingpin.CmdClause
 	interDelete *kingpin.CmdClause
 	interStreamName string
@@ -55,6 +56,7 @@ func init() {
 
 	// Manage streams
 	interList = interApp.Command("list", "List the available Kinesis streams.")
+	interListType = interList.Arg("type", "List all the arguments. ").Required().Enum("aws", "group")
 	interCreate = interApp.Command("create", "Create a new Kinesis stream.")
 	interCreate.Arg("stream", "Name of Kinesis stream to create").Required().StringVar(&interStreamName)
 	interDelete = interApp.Command("delete", "Delete a specific Kinesis stream.")
@@ -146,28 +148,32 @@ func doDeleteStream(g *KinesisStreamGroup) (error) {
 	return err
 }
 
-func doListStreams(g *KinesisStreamGroup) (error) {
-	streams, err := g.ListStreams()
-	if err == nil {
-		for i, description := range streams {
-			fmt.Printf("%d. %s\n", i+1, description.Name)
-			sd := description.Description
-			fmt.Printf("%20s %s\n", "Stream Status:", *sd.StreamStatus)
-			fmt.Printf("%20s %s\n", "ARN:", *sd.StreamARN)
-			fmt.Printf("%20s %d\n", "Number of Shards:", len(sd.Shards))
-			fmt.Printf("%20s [", "ShardNames:")
-			for j, shard := range sd.Shards {
-				fmt.Printf("%s", *shard.ShardID)
-				if j < (len(sd.Shards) - 1) {
-					fmt.Printf(", ")
-				}
-				// Put three shardIDs to a line, then 'tab' over
-				if ((j + 1) % 3) == 0 {
-					fmt.Printf("%20s ", "")
+func doListStreams(g *KinesisStreamGroup) (err error) {
+
+	if *interListType == "aws" {
+		streams, err := g.ListStreams()
+		if err == nil {
+			for i, description := range streams {
+				fmt.Printf("%d. %s\n", i+1, description.Name)
+				sd := description.Description
+				fmt.Printf("%20s %s\n", "Stream Status:", *sd.StreamStatus)
+				fmt.Printf("%20s %s\n", "ARN:", *sd.StreamARN)
+				fmt.Printf("%20s %d\n", "Number of Shards:", len(sd.Shards))
+				fmt.Printf("%20s [", "ShardNames:")
+				for j, shard := range sd.Shards {
+					fmt.Printf("%s", *shard.ShardID)
+					if j < (len(sd.Shards) - 1) {
+						fmt.Printf(", ")
+					}
+					// Put three shardIDs to a line, then 'tab' over
+					if ((j + 1) % 3) == 0 {
+						fmt.Printf("%20s ", "")
+					}
 				}
 			}
-			fmt.Printf("]\n")
 		}
+	} else {
+		fmt.Printf("The local group is: %s.\n", g.Description())
 	}
 	return err
 }

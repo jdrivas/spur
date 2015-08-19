@@ -34,6 +34,7 @@ func printAWSError(err error) {
 	}
 }
 
+// TODO: Add a 'quit' and 'exit' option for getting out of comamnd processing.
 func promptLoop(prompt string, process func(string) (error)) (err error) {
 
 	for moreCommands := true; moreCommands; {
