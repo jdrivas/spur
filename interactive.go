@@ -1,16 +1,20 @@
 package main
+// TODO: pull this out as it's own package.
 
 import (
   "fmt"
   "log"
   "strings"
   "time"
+  "io"
   "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
   interApp     *kingpin.Application
 
+  interExit *kingpin.CmdClause
+  interQuit *kingpin.CmdClause
   interVerbose *kingpin.CmdClause
   iVerbose bool
 
@@ -41,6 +45,8 @@ func init() {
 
   // state 
   interVerbose = interApp.Command("verbose", "toggle verbose mode")
+  interExit = interApp.Command("exit", "exit the program. <ctrl-D> works too.")
+  interQuit = interApp.Command("quit", "exit the program.")
 
   // Write to stream
   interIterate = interApp.Command("iterate", "Push a number of log entires to the Kinesis stream.")
@@ -69,7 +75,7 @@ func init() {
 }
 
 
-func doICommand(line string, g *KinesisStreamGroup) (err error) {
+func DoICommand(line string, g *KinesisStreamGroup) (err error) {
 
   // This is due to a 'peculiarity' kingpin, it collects strings as arguments across parses.
   interTestString = []string{}
@@ -84,7 +90,7 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
 
   command, err := interApp.Parse(fields)
   if err != nil {
-    fmt.Printf("Command error: %s\n", err)
+    fmt.Printf("Command error: %s.\n", err)
     return nil
   } else {
     switch command {
@@ -96,7 +102,9 @@ func doICommand(line string, g *KinesisStreamGroup) (err error) {
       case interRead.FullCommand(): err = doReadStream(g)
       case interShow.FullCommand(): err = doShowStream(g)
       case interUse.FullCommand(): err = doUseStream(g)
-      case interVerbose.FullCommand(): doVerbose()      
+      case interVerbose.FullCommand(): err = doVerbose()
+      case interExit.FullCommand(): err = doQuit()
+      case interQuit.FullCommand(): err = doQuit() 
       case "help": // do nothing in the case we fall through to help.
       default: fmt.Printf("(Shoudn't get here) - Unknown Command: %s\n", command)
     }
@@ -109,12 +117,17 @@ func toggleVerbose() (bool) {
   return iVerbose
 }
 
-func doVerbose() {
+func doVerbose() (error){
   if toggleVerbose() {
     fmt.Println("Verbose is on.")
   } else {
     fmt.Println("Verbose is off.")    
   }
+  return nil
+}
+
+func doQuit() (error) {
+  return io.EOF
 }
 
 

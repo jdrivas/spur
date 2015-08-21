@@ -292,7 +292,7 @@ func doRead(s *KinesisStream) {
 func doInteractive(g *KinesisStreamGroup) {
 
   // why can't I declare this inline in the promptLoop call?
-  xICommand := func(line string) (err error) {return doICommand(line, g)}
+  xICommand := func(line string) (err error) {return DoICommand(line, g)}
   prompt := g.CurrentStream.Name + "(" + g.Region + ") >"
   err := promptLoop(prompt, xICommand)
   if err != nil {fmt.Printf("Error - %s.\n", err)}
