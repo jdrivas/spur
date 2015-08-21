@@ -3,7 +3,6 @@ package main
 import (
   "fmt"
   "io"
-  "log"
   "github.com/bobappleyard/readline"
   "github.com/aws/aws-sdk-go/aws/awserr"
 )
@@ -34,19 +33,23 @@ func printAWSError(err error) {
   }
 }
 
-// TODO: Add a 'quit' and 'exit' option for getting out of comamnd processing.
 func promptLoop(prompt string, process func(string) (error)) (err error) {
 
+  errStr := "Error - %s.\n"
   for moreCommands := true; moreCommands; {
     line, err := readline.String(prompt)
     if err == io.EOF {
       moreCommands = false
     } else if err != nil {
-      log.Fatal(err)
+      fmt.Printf(errStr, err)
     } else {
       readline.AddHistory(line)
       err = process(line)
-      if err != nil {return err}
+      if err == io.EOF {
+        moreCommands = false
+      } else if err != nil {
+        fmt.Printf(errStr, err)
+      }
     }
   }
   return nil

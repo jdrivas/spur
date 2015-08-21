@@ -56,7 +56,7 @@ func (g *KinesisStreamGroup) GetStream(name string) (stream *KinesisStream, err 
   stream = g.Streams[name]
   err = nil
   if stream == nil {
-    err = errors.New(fmt.Sprintf("Coulnd't find the stream named: \"%s\".", name))
+    err = errors.New(fmt.Sprintf("Coulnd't find the stream named: \"%s\"", name))
   }
   return stream, err
 }

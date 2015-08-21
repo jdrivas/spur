@@ -295,9 +295,7 @@ func doInteractive(g *KinesisStreamGroup) {
   xICommand := func(line string) (err error) {return doICommand(line, g)}
   prompt := g.CurrentStream.Name + "(" + g.Region + ") >"
   err := promptLoop(prompt, xICommand)
-  if err != nil {
-    fmt.Printf("Error - %s\n", err)
-  }
+  if err != nil {fmt.Printf("Error - %s.\n", err)}
 }
 
 
