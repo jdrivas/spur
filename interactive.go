@@ -44,7 +44,7 @@ func init() {
   interApp = kingpin.New("", "Spur interactive mode.").Terminate(doTerminate)
 
   // state 
-  interVerbose = interApp.Command("verbose", "toggle verbose mode")
+  interVerbose = interApp.Command("verbose", "toggle verbose mode. The application will tell you what it's doing as it does it.")
   interExit = interApp.Command("exit", "exit the program. <ctrl-D> works too.")
   interQuit = interApp.Command("quit", "exit the program.")
 
